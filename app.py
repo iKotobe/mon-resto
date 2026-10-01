@@ -3,22 +3,28 @@ import pandas as pd
 
 st.set_page_config(page_title="Pilote Resto", page_icon="🍽️", layout="wide")
 
+st.markdown("""
+<style>
+    .reportview-container .main .block-container{ max-width: 600px; padding-top: 1rem; }
+    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #FF4B4B; color: white; }
+    .metric-box { padding: 15px; border-radius: 10px; background-color: #f0f2f6; margin-bottom: 10px; text-align: center; }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🍽️ Pilote Resto Pro")
 st.caption("Objectif : 66% Coût Matière Max | 34% Marge Brute Min")
 
-# Demande directement l'identifiant unique du tableur
-sheet_id = st.text_input("🔑 Entrez l'identifiant unique de votre Google Sheet :", type="password")
+# Lecture simplifiée de l'identifiant
+if "RESTAURANT_SHEET_URL" in st.secrets:
+    sheet_id = st.secrets["RESTAURANT_SHEET_URL"]
+else:
+    sheet_id = st.text_input("🔑 Entrez l'identifiant unique de votre Google Sheet :", type="password")
 
 if not sheet_id:
-    st.info("👋 Veuillez coller l'identifiant de votre Google Sheet pour activer le tableau de bord.")
-    st.markdown("""
-    **Où le trouver ?**  
-    Dans le lien de votre Google Sheet, c'est le long texte situé juste après `/d/`.  
-    *Exemple : si votre lien est `.../d/1A2B3C4D5E6F/edit`, votre identifiant est `1A2B3C4D5E6F`*
-    """)
+    st.info("👋 Veuillez configurer l'identifiant Google Sheets pour activer le tableau de bord.")
 else:
     try:
-        # Nettoyage automatique au cas où l'utilisateur colle le lien entier malgré tout
+        # Nettoyage automatique au cas où l'utilisateur met le lien entier
         id_propre = sheet_id.strip()
         if "spreadsheets/d/" in id_propre:
             id_propre = id_propre.split("spreadsheets/d/")[1].split("/")[0]
@@ -28,19 +34,19 @@ else:
             url = f"https://google.com{id_propre}/export?format=csv&sheet={sheet_name}"
             return pd.read_csv(url)
 
-        # Chargement des données
+        # Chargement automatique de vos 3 onglets configurés
         df_ing = load_sheet("Ingredients")
         df_rec = load_sheet("Recettes")
         df_chg = load_sheet("Charges")
         
+        # Nettoyage automatique des noms de colonnes
         df_ing.columns = df_ing.columns.str.strip()
         df_rec.columns = df_rec.columns.str.strip()
         df_chg.columns = df_chg.columns.str.strip()
 
         df_ing = df_ing.fillna({"Stock_Actuel": 0, "Stock_Alerte": 0, "Fournisseur": "Inconnu", "Prix_Achat": 0})
 
-        st.success("🎉 Synchronisation réussie !")
-        
+        # CRÉATION DES ONGLETS SUR VOTRE ÉCRAN MOBILE
         tab1, tab2, tab3 = st.tabs(["📊 Rentabilité", "🍳 Recettes & Marges", "🛒 Courses"])
 
         # TAB 1 : RENTABILITÉ GLOBALE
@@ -61,31 +67,39 @@ else:
             benefice_net = marge_brute_estimée - total_charges_fixes
             seuil_rentabilite_ttc = (total_charges_fixes / 0.34) * 1.10 if total_charges_fixes > 0 else 0.0
 
-            st.metric("CA Hors Taxes", f"{ca_ht:.2f} €", f"TVA: {tva_collectee:.2f} €")
-            st.metric("Coût Matière Max (66%)", f"{cout_matiere_estimé:.2f} €")
-            st.metric("Frais Fixes", f"{total_charges_fixes:.2f} €")
+            st.markdown(f"<div class='metric-box'><h3>CA Hors Taxes</h3><h2>{ca_ht:.2f} €</h2><small>TVA : {tva_collectee:.2f} €</small></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-box'><h3>Coût Matière Max (66%)</h3><h2>{cout_matiere_estimé:.2f} €</h2></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-box'><h3>Frais Fixes</h3><h2>{total_charges_fixes:.2f} €</h2></div>", unsafe_allow_html=True)
             
             if benefice_net >= 0:
-                st.success(f"Bénéfice Net Estimé : +{benefice_net:.2f} €")
+                st.markdown(f"<div class='metric-box' style='background-color: #d4edda; color: #155724;'><h3>Bénéfice Net</h3><h2>+{benefice_net:.2f} €</h2></div>", unsafe_allow_html=True)
             else:
-                st.error(f"Déficit Net Estimé : {benefice_net:.2f} €")
+                st.markdown(f"<div class='metric-box' style='background-color: #f8d7da; color: #721c24;'><h3>Déficit Net</h3><h2>{benefice_net:.2f} €</h2></div>", unsafe_allow_html=True)
 
         # TAB 2 : RECETTES & MARGES
         with tab2:
             st.subheader("🍳 Analyse Fiches Techniques")
             if not df_rec.empty and 'Plat' in df_rec.columns:
-                prix_dict = dict(zip(df_ing['Ingrédient'].astype(str).str.strip(), df_ing['Prix_Achat'].astype(float)))
+                # S'adapte à l'orthographe exacte de vos colonnes
+                col_qte = 'Quantite_Req' if 'Quantite_Req' in df_rec.columns else 'Quantite_Requise'
+                col_px_vente = 'Prix_Vente_TTC' if 'Prix_Vente_TTC' in df_rec.columns else df_rec.columns[-1]
+                
+                prix_dict = dict(zip(df_ing['Ingredient'].astype(str).str.strip(), df_ing['Prix_Achat'].astype(float)))
                 
                 for plat in df_rec['Plat'].unique():
                     df_plat = df_rec[df_rec['Plat'] == plat]
                     cout_plat = 0.0
                     
                     for _, row in df_plat.iterrows():
-                        ing = str(row['Ingrédient']).strip()
-                        qte = float(row['Quantité_Requise'])
+                        ing = str(row['Ingredient']).strip()
+                        qte = float(row[col_qte])
                         cout_plat += qte * prix_dict.get(ing, 0.0)
                     
-                    px_vente_ttc = float(df_plat['Prix_Vente_TTC'].iloc[0]) if 'Prix_Vente_TTC' in df_plat.columns else 0.0
+                    try:
+                        px_vente_ttc = float(df_plat[col_px_vente].iloc[0])
+                    except:
+                        px_vente_ttc = 0.0
+                        
                     px_vente_ht = px_vente_ttc / 1.10
                     food_cost_ratio = (cout_plat / px_vente_ht) * 100 if px_vente_ht > 0 else 0
                     prix_conseille_ttc = (cout_plat / 0.66) * 1.10
@@ -99,7 +113,7 @@ else:
                         else:
                             st.markdown(f"🟢 **Food Cost : {food_cost_ratio:.1f}%** (Marge OK)")
             else:
-                st.info("💡 Ajoutez des recettes dans votre Google Sheet pour voir vos marges.")
+                st.info("💡 Ajoutez des recettes complètes dans votre Sheet pour voir vos marges.")
 
         # TAB 3 : LISTE DE COURSES
         with tab3:
@@ -116,11 +130,11 @@ else:
                     liste_texte = "📋 COMMANDES RESTAURANT :\n"
                     for _, row in df_alerte.iterrows():
                         manquant = float(row['Stock_Alerte']) - float(row['Stock_Actuel'])
-                        liste_texte += f"- {row['Ingrédient']} : {manquant:.1f} {row['Unité']}\n"
-                        st.write(f"❌ **{row['Ingrédient']}** : reste {row['Stock_Actuel']} (Alerte: {row['Stock_Alerte']})")
+                        fourn = row['Fournisseur'] if 'Fournisseur' in df_ing.columns else "Général"
+                        liste_texte += f"- {row['Ingredient']} : {manquant:.1f}\n"
+                        st.write(f"❌ **{row['Ingredient']}** ({fourn}) : reste {row['Stock_Actuel']} (Alerte: {row['Stock_Alerte']})")
                     
-                    st.text_area("Texte à envoyer :", value=liste_texte, height=120)
+                    st.text_area("Texte à copier :", value=liste_texte, height=120)
                 
     except Exception as e:
-        st.error(f"Erreur d'accès : {e}. Assurez-vous que l'onglet de votre Google Sheet s'appelle bien 'Ingredients' (sans accent) et qu'il est partagé en mode 'Tous les utilisateurs disposant du lien'.")
-        
+        st.error(f"Erreur de lecture : {e}. Assurez-vous que l'onglet 'Ingredients' contient bien du contenu.")
