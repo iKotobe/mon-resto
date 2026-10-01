@@ -1,5 +1,5 @@
 import streamlit as st
-from streamlit_connections import GSheetsConnection
+import pandas as pd
 
 st.set_page_config(page_title="Pilote Resto", page_icon="🍽️", layout="wide")
 
@@ -14,24 +14,31 @@ st.markdown("""
 st.title("🍽️ Pilote Resto Pro")
 st.caption("Objectif : 66% Coût Matière Max | 34% Marge Brute Min")
 
+# Identifiant extrait directement de vos secrets ou de votre capture d'écran
+sheet_id = "1331pkmSJfbeWf2pl69fbjBenig_vlgkVNZd5OXiUvE"
+
 try:
-    # Connexion native et officielle à Google Sheets
-    conn = st.connection("gsheets", type=GSheetsConnection)
+    # Lecture directe via l'API Web publique sans installer aucun module externe
+    @st.cache_data(ttl=2)
+    def load_sheet(sheet_name):
+        url = f"https://google.com{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+        return pd.read_csv(url)
+
+    # Chargement immédiat de vos onglets
+    df_ing = load_sheet("Ingredients")
+    df_rec = load_sheet("Recettes")
+    df_chg = load_sheet("Charges")
     
-    # Chargement forcé des données avec reconnexions automatiques
-    df_ing = conn.read(worksheet="Ingredients", ttl=2)
-    df_rec = conn.read(worksheet="Recettes", ttl=2)
-    df_chg = conn.read(worksheet="Charges", ttl=2)
-    
-    # Nettoyage des colonnes
+    # Nettoyage automatique des noms de colonnes
     df_ing.columns = df_ing.columns.str.strip()
     df_rec.columns = df_rec.columns.str.strip()
     df_chg.columns = df_chg.columns.str.strip()
 
-    st.success("🎉 Synchronisation réussie via connexion sécurisée !")
+    st.success("🎉 Synchronisation réussie !")
     
     tab1, tab2, tab3 = st.tabs(["📊 Rentabilité", "🍳 Recettes & Marges", "🛒 Courses"])
 
+    # TAB 1 : RENTABILITÉ GLOBALE
     with tab1:
         st.subheader("📈 Bilan Financier du Mois")
         ca_ttc = st.number_input("Chiffre d'Affaires Mensuel TTC (€) :", min_value=0.0, value=10000.0, step=500.0)
@@ -54,6 +61,7 @@ try:
         else:
             st.error(f"Déficit : {benefice_net:.2f} €")
 
+    # TAB 2 : RECETTES & MARGES
     with tab2:
         st.subheader("🍳 Analyse Fiches Techniques")
         if not df_rec.empty and 'Plat' in df_rec.columns:
@@ -71,11 +79,13 @@ try:
                 with st.expander(f"🍽️ {plat}"):
                     st.write(f"Coût ingrédients : {cout_plat:.2f} €")
         else:
-            st.info("💡 Ajoutez des lignes dans votre onglet 'Recettes' pour voir vos marges.")
+            st.info("💡 Ajoutez vos premières fiches techniques dans l'onglet 'Recettes' pour analyser vos marges.")
 
+    # TAB 3 : LISTE DE COURSES
     with tab3:
         st.subheader("🛒 Liste d'achats automatique")
-        st.info("Interface de courses opérationnelle.")
+        st.success("🎉 Votre liste de courses s'affichera ici en fonction de vos niveaux de stock.")
             
 except Exception as e:
-    st.error(f"Connexion en cours d'établissement... Veuillez rafraîchir la page dans 10 secondes. (Détail : {e})")
+    st.error(f"En attente de connexion avec Google... (Détail technique : {e})")
+    
