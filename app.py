@@ -1,65 +1,46 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 
 st.set_page_config(page_title="Pilote Resto", page_icon="🍽️", layout="wide")
-
-st.markdown("""
-<style>
-    .reportview-container .main .block-container{ max-width: 600px; padding-top: 1rem; }
-    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #FF4B4B; color: white; }
-    .metric-box { padding: 15px; border-radius: 10px; background-color: #f0f2f6; margin-bottom: 10px; text-align: center; }
-</style>
-""", unsafe_allow_html=True)
 
 st.title("🍽️ Pilote Resto Pro")
 st.caption("Objectif : 66% Coût Matière Max | 34% Marge Brute Min")
 
-# Vérification de la présence du lien dans les secrets ou via saisie
-if "RESTAURANT_SHEET_URL" in st.secrets:
-    sheet_url = st.secrets["RESTAURANT_SHEET_URL"]
-else:
-    sheet_url = st.text_input("🔗 Lien secret Google Sheets :", type="password")
+# Demande directement l'identifiant unique du tableur
+sheet_id = st.text_input("🔑 Entrez l'identifiant unique de votre Google Sheet :", type="password")
 
-if not sheet_url:
-    st.info("👋 Veuillez coller votre lien Google Sheets pour activer le tableau de bord.")
+if not sheet_id:
+    st.info("👋 Veuillez coller l'identifiant de votre Google Sheet pour activer le tableau de bord.")
+    st.markdown("""
+    **Où le trouver ?**  
+    Dans le lien de votre Google Sheet, c'est le long texte situé juste après `/d/`.  
+    *Exemple : si votre lien est `.../d/1A2B3C4D5E6F/edit`, votre identifiant est `1A2B3C4D5E6F`*
+    """)
 else:
     try:
-        # NETTOYAGE DU LIEN : Cette méthode isole l'identifiant unique quoi qu'il arrive
-        # Un lien ressemble à https://google.com...
-        url_parts = sheet_url.split("/")
-        sheet_id = None
-        for i, part in enumerate(url_parts):
-            if part == "d" and i + 1 < len(url_parts):
-                sheet_id = url_parts[i + 1]
-                break
-        
-        if not sheet_id:
-            # Si le lien est juste l'ID copié directement
-            sheet_id = sheet_url.strip()
+        # Nettoyage automatique au cas où l'utilisateur colle le lien entier malgré tout
+        id_propre = sheet_id.strip()
+        if "spreadsheets/d/" in id_propre:
+            id_propre = id_propre.split("spreadsheets/d/")[1].split("/")[0]
 
         @st.cache_data(ttl=2)
         def load_sheet(sheet_name):
-            # Construction universelle du lien d'export CSV
-            url = f"https://google.com{sheet_id}/export?format=csv&sheet={sheet_name}"
+            url = f"https://google.com{id_propre}/export?format=csv&sheet={sheet_name}"
             return pd.read_csv(url)
 
-        # Chargement des 3 onglets indispensables
+        # Chargement des données
         df_ing = load_sheet("Ingredients")
         df_rec = load_sheet("Recettes")
         df_chg = load_sheet("Charges")
         
-        # Nettoyage des espaces superflus dans les noms des colonnes
         df_ing.columns = df_ing.columns.str.strip()
         df_rec.columns = df_rec.columns.str.strip()
         df_chg.columns = df_chg.columns.str.strip()
 
-        # Remplacement des cases vides par des valeurs par défaut pour éviter les plantages
         df_ing = df_ing.fillna({"Stock_Actuel": 0, "Stock_Alerte": 0, "Fournisseur": "Inconnu", "Prix_Achat": 0})
 
         st.success("🎉 Synchronisation réussie !")
         
-        # Structure de l'application en onglets mobiles
         tab1, tab2, tab3 = st.tabs(["📊 Rentabilité", "🍳 Recettes & Marges", "🛒 Courses"])
 
         # TAB 1 : RENTABILITÉ GLOBALE
@@ -80,16 +61,14 @@ else:
             benefice_net = marge_brute_estimée - total_charges_fixes
             seuil_rentabilite_ttc = (total_charges_fixes / 0.34) * 1.10 if total_charges_fixes > 0 else 0.0
 
-            st.markdown(f"<div class='metric-box'><h3>CA Hors Taxes</h3><h2>{ca_ht:.2f} €</h2><small>TVA : {tva_collectee:.2f} €</small></div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='metric-box'><h3>Coût Matière Max (66%)</h3><h2>{cout_matiere_estimé:.2f} €</h2></div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='metric-box'><h3>Frais Fixes</h3><h2>{total_charges_fixes:.2f} €</h2></div>", unsafe_allow_html=True)
+            st.metric("CA Hors Taxes", f"{ca_ht:.2f} €", f"TVA: {tva_collectee:.2f} €")
+            st.metric("Coût Matière Max (66%)", f"{cout_matiere_estimé:.2f} €")
+            st.metric("Frais Fixes", f"{total_charges_fixes:.2f} €")
             
             if benefice_net >= 0:
-                st.markdown(f"<div class='metric-box' style='background-color: #d4edda; color: #155724;'><h3>Bénéfice Net</h3><h2>+{benefice_net:.2f} €</h2></div>", unsafe_allow_html=True)
+                st.success(f"Bénéfice Net Estimé : +{benefice_net:.2f} €")
             else:
-                st.markdown(f"<div class='metric-box' style='background-color: #f8d7da; color: #721c24;'><h3>Déficit Net</h3><h2>{benefice_net:.2f} €</h2></div>", unsafe_allow_html=True)
-                
-            st.info(f"📍 Objectif CA Minimum : **{seuil_rentabilite_ttc:.2f} € TTC**")
+                st.error(f"Déficit Net Estimé : {benefice_net:.2f} €")
 
         # TAB 2 : RECETTES & MARGES
         with tab2:
@@ -120,7 +99,7 @@ else:
                         else:
                             st.markdown(f"🟢 **Food Cost : {food_cost_ratio:.1f}%** (Marge OK)")
             else:
-                st.info("💡 Ajoutez vos premières recettes dans l'onglet 'Recettes' de votre Google Sheet pour voir vos marges.")
+                st.info("💡 Ajoutez des recettes dans votre Google Sheet pour voir vos marges.")
 
         # TAB 3 : LISTE DE COURSES
         with tab3:
@@ -137,12 +116,11 @@ else:
                     liste_texte = "📋 COMMANDES RESTAURANT :\n"
                     for _, row in df_alerte.iterrows():
                         manquant = float(row['Stock_Alerte']) - float(row['Stock_Actuel'])
-                        liste_texte += f"- {row['Ingrédient']} ({row['Fournisseur']}) : {manquant:.1f} {row['Unité']}\n"
-                        st.write(f"❌ **{row['Ingrédient']}** ({row['Fournisseur']}) : reste {row['Stock_Actuel']} (Alerte: {row['Stock_Alerte']})")
+                        liste_texte += f"- {row['Ingrédient']} : {manquant:.1f} {row['Unité']}\n"
+                        st.write(f"❌ **{row['Ingrédient']}** : reste {row['Stock_Actuel']} (Alerte: {row['Stock_Alerte']})")
                     
-                    st.text_area("Texte à copier pour SMS / WhatsApp :", value=liste_texte, height=120)
-            else:
-                st.warning("Vérifiez les colonnes de votre onglet Ingredients.")
+                    st.text_area("Texte à envoyer :", value=liste_texte, height=120)
                 
     except Exception as e:
-        st.error(f"Erreur d'accès : {e}. Vérifiez que l'accès général de votre Google Sheet est configuré sur 'Tous les utilisateurs disposant du lien'.")
+        st.error(f"Erreur d'accès : {e}. Assurez-vous que l'onglet de votre Google Sheet s'appelle bien 'Ingredients' (sans accent) et qu'il est partagé en mode 'Tous les utilisateurs disposant du lien'.")
+        
