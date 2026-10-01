@@ -15,7 +15,7 @@ st.markdown("""
 st.title("🍽️ Pilote Resto Pro")
 st.caption("Objectif : 66% Coût Matière Max | 34% Marge Brute Min")
 
-# Lecture simplifiée du lien
+# Vérification de la présence du lien dans les secrets ou via saisie
 if "RESTAURANT_SHEET_URL" in st.secrets:
     sheet_url = st.secrets["RESTAURANT_SHEET_URL"]
 else:
@@ -25,34 +25,41 @@ if not sheet_url:
     st.info("👋 Veuillez coller votre lien Google Sheets pour activer le tableau de bord.")
 else:
     try:
-        # Cette formule magique extrait l'identifiant unique du lien à coup sûr
-        if "/d/" in sheet_url:
-            sheet_id = sheet_url.split("/d/")[1].split("/")[0]
-        else:
-            sheet_id = sheet_url
+        # NETTOYAGE DU LIEN : Cette méthode isole l'identifiant unique quoi qu'il arrive
+        # Un lien ressemble à https://google.com...
+        url_parts = sheet_url.split("/")
+        sheet_id = None
+        for i, part in enumerate(url_parts):
+            if part == "d" and i + 1 < len(url_parts):
+                sheet_id = url_parts[i + 1]
+                break
+        
+        if not sheet_id:
+            # Si le lien est juste l'ID copié directement
+            sheet_id = sheet_url.strip()
 
-        @st.cache_data(ttl=5)
+        @st.cache_data(ttl=2)
         def load_sheet(sheet_name):
-            # Construction propre du lien d'export CSV pour Google Sheets
+            # Construction universelle du lien d'export CSV
             url = f"https://google.com{sheet_id}/export?format=csv&sheet={sheet_name}"
             return pd.read_csv(url)
 
-        # Chargement forcé des données
+        # Chargement des 3 onglets indispensables
         df_ing = load_sheet("Ingredients")
         df_rec = load_sheet("Recettes")
         df_chg = load_sheet("Charges")
         
-        # Nettoyage des colonnes
+        # Nettoyage des espaces superflus dans les noms des colonnes
         df_ing.columns = df_ing.columns.str.strip()
         df_rec.columns = df_rec.columns.str.strip()
         df_chg.columns = df_chg.columns.str.strip()
 
-        # Remplacement des valeurs vides par sécurité
+        # Remplacement des cases vides par des valeurs par défaut pour éviter les plantages
         df_ing = df_ing.fillna({"Stock_Actuel": 0, "Stock_Alerte": 0, "Fournisseur": "Inconnu", "Prix_Achat": 0})
 
         st.success("🎉 Synchronisation réussie !")
         
-        # Affichage des onglets de contrôle
+        # Structure de l'application en onglets mobiles
         tab1, tab2, tab3 = st.tabs(["📊 Rentabilité", "🍳 Recettes & Marges", "🛒 Courses"])
 
         # TAB 1 : RENTABILITÉ GLOBALE
@@ -65,9 +72,8 @@ else:
             cout_matiere_estimé = ca_ht * 0.66
             marge_brute_estimée = ca_ht * 0.34
             
-            # Gestion si l'onglet charges est encore vide
             if not df_chg.empty and 'Type' in df_chg.columns and 'Montant_Mensuel' in df_chg.columns:
-                total_charges_fixes = float(df_chg[df_chg['Type'].str.lower() == 'fixe']['Montant_Mensuel'].sum())
+                total_charges_fixes = float(df_chg[df_chg['Type'].astype(str).str.lower() == 'fixe']['Montant_Mensuel'].sum())
             else:
                 total_charges_fixes = 0.0
                 
@@ -89,7 +95,7 @@ else:
         with tab2:
             st.subheader("🍳 Analyse Fiches Techniques")
             if not df_rec.empty and 'Plat' in df_rec.columns:
-                prix_dict = dict(zip(df_ing['Ingrédient'].str.strip(), df_ing['Prix_Achat']))
+                prix_dict = dict(zip(df_ing['Ingrédient'].astype(str).str.strip(), df_ing['Prix_Achat'].astype(float)))
                 
                 for plat in df_rec['Plat'].unique():
                     df_plat = df_rec[df_rec['Plat'] == plat]
@@ -114,13 +120,16 @@ else:
                         else:
                             st.markdown(f"🟢 **Food Cost : {food_cost_ratio:.1f}%** (Marge OK)")
             else:
-                st.info("💡 Ajoutez vos premières recettes dans l'onglet 'Recettes' pour voir vos marges.")
+                st.info("💡 Ajoutez vos premières recettes dans l'onglet 'Recettes' de votre Google Sheet pour voir vos marges.")
 
         # TAB 3 : LISTE DE COURSES
         with tab3:
             st.subheader("🛒 Liste d'achats automatique")
             if 'Stock_Actuel' in df_ing.columns and 'Stock_Alerte' in df_ing.columns:
-                df_alerte = df_ing[df_ing['Stock_Actuel'].astype(float) < df_ing['Stock_Alerte'].astype(float)]
+                df_ing['Stock_Actuel'] = pd.to_numeric(df_ing['Stock_Actuel'], errors='coerce').fillna(0)
+                df_ing['Stock_Alerte'] = pd.to_numeric(df_ing['Stock_Alerte'], errors='coerce').fillna(0)
+                
+                df_alerte = df_ing[df_ing['Stock_Actuel'] < df_ing['Stock_Alerte']]
                 
                 if df_alerte.empty:
                     st.success("🎉 Stocks parfaits ! Aucune commande nécessaire.")
@@ -133,7 +142,7 @@ else:
                     
                     st.text_area("Texte à copier pour SMS / WhatsApp :", value=liste_texte, height=120)
             else:
-                st.warning("Vérifiez que les colonnes 'Stock_Actuel' et 'Stock_Alerte' existent dans votre onglet Ingredients.")
+                st.warning("Vérifiez les colonnes de votre onglet Ingredients.")
                 
     except Exception as e:
-        st.error(f"Erreur de lecture : {e}. Vérifiez que l'accès général de votre Google Sheet est bien sur 'Tous les utilisateurs disposant du lien'.")
+        st.error(f"Erreur d'accès : {e}. Vérifiez que l'accès général de votre Google Sheet est configuré sur 'Tous les utilisateurs disposant du lien'.")
